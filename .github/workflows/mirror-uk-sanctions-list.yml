@@ -1,0 +1,83 @@
+name: Mirror UK Sanctions List
+
+on:
+  schedule:
+    # Дважды в сутки: списку хватает, а раннеры публичных репо бесплатны.
+    - cron: "40 4,16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: uk-sanctions-list
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: fetch and validate the official UK Sanctions List
+        run: |
+          set -euo pipefail
+          curl -fsSL --proto '=https' --tlsv1.2 \
+            --retry 4 --retry-all-errors --max-time 300 \
+            -A "official-lists-mirror/1.0 (+https://github.com/memento-lab/official-lists-mirror)" \
+            -o UK-Sanctions-List.xml \
+            "https://sanctionslist.fcdo.gov.uk/docs/UK-Sanctions-List.xml"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import xml.etree.ElementTree as ET
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          raw = Path("UK-Sanctions-List.xml").read_bytes()
+          if len(raw) < 10_000_000:
+              raise SystemExit(f"suspiciously small UKSL payload: {len(raw)} bytes")
+          root = ET.fromstring(raw)
+          if root.tag != "Designations":
+              raise SystemExit(f"unexpected root element: {root.tag!r}")
+          designations = root.findall("Designation")
+          if len(designations) < 4000:
+              raise SystemExit(f"unexpected designation count: {len(designations)}")
+          generated = (root.findtext("DateGenerated") or "").strip()
+          manifest = {
+              "dataset": "uk_sanctions_list",
+              "source_url": "https://sanctionslist.fcdo.gov.uk/docs/UK-Sanctions-List.xml",
+              "fetched_at": datetime.now(timezone.utc).isoformat(),
+              "date_generated": generated,
+              "bytes": len(raw),
+              "sha256": hashlib.sha256(raw).hexdigest(),
+              "designations": len(designations),
+          }
+          Path("manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          print(json.dumps(manifest, indent=2))
+          PY
+      - name: publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="uk-sanctions-list"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+              --title "UK Sanctions List (rolling mirror)" \
+              --notes "Bit-identical rolling mirror of the official FCDO UK Sanctions List XML. manifest.json carries origin URL, fetch time, size, SHA-256 and record count; Actions run logs are the audit trail."
+          fi
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
+            UK-Sanctions-List.xml manifest.json
+      - name: record freshness in-repo
+        run: |
+          set -euo pipefail
+          mkdir -p uk
+          cp manifest.json uk/manifest.json
+          git config user.name "official-lists-mirror"
+          git config user.email "actions@users.noreply.github.com"
+          git add uk/manifest.json
+          if ! git diff --cached --quiet; then
+            git commit -m "uk: $(python3 -c "import json; print(json.load(open('uk/manifest.json'))['sha256'][:16])")"
+            git push
+          fi
