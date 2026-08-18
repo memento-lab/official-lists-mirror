@@ -1,9 +1,9 @@
 {
   "dataset": "uk_sanctions_list",
   "source_url": "https://sanctionslist.fcdo.gov.uk/docs/UK-Sanctions-List.xml",
-  "fetched_at": "2026-08-18T05:05:28.856940+00:00",
-  "date_generated": "14/08/2026",
-  "bytes": 21758989,
-  "sha256": "b85237d140c8920c7d8e0196eb9053e353a278c05bc77b6a5382eb63eddca93e",
+  "fetched_at": "2026-08-18T17:01:01.223189+00:00",
+  "date_generated": "18/08/2026",
+  "bytes": 21759949,
+  "sha256": "777a2effade0c2319b18b52b443dbeeceb7757e71cb2ad7d3993d4f6ff2d202b",
   "designations": 6334
 }
